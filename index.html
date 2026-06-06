@@ -22,16 +22,17 @@
 <script>
 "use strict";
 /* =========================================================================
-   HIZA Shooting v8
-   - 自機 全画面移動可能化（右制限撤廃）
-   - 装備の弱体化防止（LASER所持時にDOUBLE確定を無視）
-   - チュートリアルページ追加（タイトルから導線）
-   - タイトルを「はじめる / 遊び方」2択メニュー化
-   - 画質：imageSmoothing=true / DPR対応（劣化させない）
-   - タイトル画像 hiza.jpg 相対パス読込
-   - Xキー preventDefault / blurで押下リセット
-   - ストーリー：光門真理教 / ハードボイルド / 酒 / 膝
-     「膝は前しか向かん」を 軽口→信条→教義 の三段で回収
+   HIZA Shooting v9
+   v8からの変更点：
+   1) 主砲ティア化：通常弾 < DOUBLE < LASER の3段。OPTION/SHIELD/SPEED/MISSILE
+      は補助強化として独立。補助の取得・喪失で主砲ティアが揺らがない。
+      → 「レーザー取得後に分身を取ると通常攻撃に戻る」を根治。
+   2) 膝カプセル供給増：各ステージ carrier 数を約1.5倍に増量。
+   3) レーザーを連続ビーム描画＋線分当たり判定へ変更（一本の直線）。
+   4) ストーリーを最新版に差し替え。
+   5) エンディング最終ページ中央に難易度別正方形画像を表示
+      （congrats_easy.jpg / congrats_normal.jpg / congrats_hard.jpg）。
+      読み込み失敗時は描画スキップでフォールバック。
    ========================================================================= */
 const VW=480,VH=270;
 const cv=document.getElementById('game'),ctx=cv.getContext('2d');
@@ -50,15 +51,22 @@ titleImg.onload=()=>{titleImgOK=true;};
 titleImg.onerror=()=>{titleImgOK=false;};
 titleImg.src='hiza.jpg';
 
+/* ---------- エンディング用 難易度別 正方形画像 ---------- */
+const congratsImg={easy:new Image(),normal:new Image(),hard:new Image()};
+const congratsOK={easy:false,normal:false,hard:false};
+(function(){const map={easy:'congrats_easy.jpg',normal:'congrats_normal.jpg',hard:'congrats_hard.jpg'};
+  for(const k in map){const im=congratsImg[k];im.onload=((kk)=>()=>{congratsOK[kk]=true;})(k);
+    im.onerror=((kk)=>()=>{congratsOK[kk]=false;})(k);im.src=map[k];}})();
+
 /* =========================================================================
    オーディオ（mp3クロスフェード / シンセフォールバック）
    ========================================================================= */
 const Audio=(()=>{
-  let actx=null,master=null,musicBus=null,sfxGain=null,started=false;
+  let actx=null,master=null,sfxGain=null,started=false;
   const buffers={},loadTried={};
   const MP3={menu:'menu.mp3',stage1:'stage1.mp3',stage2:'stage2.mp3',stage3:'stage3.mp3',boss:'boss.mp3'};
   let trackA=null,trackB=null,activeTrack='A';
-  let curName=null,fadeReq=null;
+  let curName=null;
   function init(){if(actx)return;
     actx=new (window.AudioContext||window.webkitAudioContext)();
     master=actx.createGain();master.gain.value=0.7;master.connect(actx.destination);
@@ -137,9 +145,9 @@ const Audio=(()=>{
    難易度
    ========================================================================= */
 const DIFF={
-  easy:{label:'EASY',desc:'初心者向け。膝に優しい',fireMul:2.6,bulletMul:0.6,hpMul:0.55,bossHpMul:0.5,invuln:170,lives:7,bombs:6,omni:false,diffSlope:0.4,startKit:true},
-  normal:{label:'NORMAL',desc:'標準。ほどよい歯ごたえ',fireMul:1.6,bulletMul:0.85,hpMul:0.85,bossHpMul:0.85,invuln:130,lives:4,bombs:4,omni:false,diffSlope:0.7,startKit:false},
-  hard:{label:'HARD',desc:'弾幕濃密。膝に来る',fireMul:1.15,bulletMul:1.0,hpMul:1.1,bossHpMul:1.15,invuln:100,lives:3,bombs:2,omni:true,diffSlope:1.0,startKit:false},
+  easy:{key:'easy',label:'EASY',desc:'初心者向け。膝に優しい',fireMul:2.6,bulletMul:0.6,hpMul:0.55,bossHpMul:0.5,invuln:170,lives:7,bombs:6,omni:false,diffSlope:0.4,startKit:true},
+  normal:{key:'normal',label:'NORMAL',desc:'標準。ほどよい歯ごたえ',fireMul:1.6,bulletMul:0.85,hpMul:0.85,bossHpMul:0.85,invuln:130,lives:4,bombs:4,omni:false,diffSlope:0.7,startKit:false},
+  hard:{key:'hard',label:'HARD',desc:'弾幕濃密。膝に来る',fireMul:1.15,bulletMul:1.0,hpMul:1.1,bossHpMul:1.15,invuln:100,lives:3,bombs:2,omni:true,diffSlope:1.0,startKit:false},
 };
 let CUR_DIFF=DIFF.normal;
 
@@ -198,7 +206,7 @@ class Pool{constructor(f,n){this.items=[];this.factory=f;for(let i=0;i<n;i++){co
   forEach(fn){for(const o of this.items)if(o.active)fn(o);}}
 
 /* =========================================================================
-   ステージ定義
+   ステージ定義（carrier 増量）
    ========================================================================= */
 const STAGES=[
   {name:'第一霊脈 ― 朝靄の幹線道路',boss:'暴走配送ドローン「ガルガン号」',mus:'stage1',
@@ -212,18 +220,18 @@ const STAGES=[
      ['離陸した途端、空は機械の群れ。','「俺の邪魔をするか。','悪いが、容赦はしねえ」'],
    ],
    waves:[
-     {t:80, fn:b=>{for(let i=0;i<4;i++)spawnEnemy('pop',VW+10,50+i*45,{},b);}},
-     {t:200,fn:b=>{for(let i=0;i<5;i++)spawnEnemy('pop',VW+10+i*16,VH-50,{},b);}},
+     {t:80, fn:b=>{for(let i=0;i<4;i++){const e=spawnEnemy('pop',VW+10,50+i*45,{},b);if(i===0)e.carrier=true;}}},
+     {t:200,fn:b=>{for(let i=0;i<5;i++){const e=spawnEnemy('pop',VW+10+i*16,VH-50,{},b);if(i===2)e.carrier=true;}}},
      {t:320,fn:b=>{const e=spawnEnemy('pop',VW+10,VH/2,{},b);e.carrier=true;}},
-     {t:420,fn:b=>{for(let i=0;i<4;i++)spawnEnemy('wave',VW+10,70+i*40,{amp:35},b);}},
-     {t:560,fn:b=>{const e=spawnEnemy('dasher',VW+10,VH/2-30,{},b);}},
+     {t:420,fn:b=>{for(let i=0;i<4;i++){const e=spawnEnemy('wave',VW+10,70+i*40,{amp:35},b);if(i===1)e.carrier=true;}}},
+     {t:560,fn:b=>{spawnEnemy('dasher',VW+10,VH/2-30,{},b);}},
      {t:640,fn:b=>{for(let i=0;i<4;i++){const e=spawnEnemy('pop',VW+10+i*16,90,{},b);if(i===1)e.carrier=true;}}},
-     {t:760,fn:b=>{spawnEnemy('turret',VW+10,55,{},b);spawnEnemy('turret',VW+10,VH-55,{carrier:true},b);}},
+     {t:760,fn:b=>{spawnEnemy('turret',VW+10,55,{carrier:true},b);spawnEnemy('turret',VW+10,VH-55,{carrier:true},b);}},
      {t:900,fn:b=>{spawnEnemy('dasher',VW+10,60,{},b);spawnEnemy('dasher',VW+10,VH-60,{},b);}},
-     {t:1000,fn:b=>{for(let i=0;i<5;i++)spawnEnemy('pop',VW+10+i*14,VH/2-40+i*20,{},b);}},
+     {t:1000,fn:b=>{for(let i=0;i<5;i++){const e=spawnEnemy('pop',VW+10+i*14,VH/2-40+i*20,{},b);if(i===2)e.carrier=true;}}},
      {t:1120,fn:b=>{for(let i=0;i<3;i++)spawnEnemy('wave',VW+10,70+i*50,{amp:45},b);
                     const e=spawnEnemy('pop',VW+10,VH/2,{},b);e.carrier=true;}},
-     {t:1280,fn:b=>{for(let i=0;i<4;i++){const e=spawnEnemy('pop',VW+10+i*16,60,{},b);if(i===2)e.carrier=true;}}},
+     {t:1280,fn:b=>{for(let i=0;i<4;i++){const e=spawnEnemy('pop',VW+10+i*16,60,{},b);if(i===0||i===2)e.carrier=true;}}},
      {t:1420,fn:()=>{G.warning=180;Audio.SE.warning();}},
      {t:1620,fn:b=>{spawnEnemy('boss',VW+30,VH/2,{},b);Audio.playMusic('boss',2,0);banner(STAGES[0].boss,150);}},
    ]},
@@ -237,18 +245,18 @@ const STAGES=[
      ['「一周忌に遅れたら檀家に顔が立たん。','南無……アクセル全開といくか」'],
    ],
    waves:[
-     {t:80, fn:b=>{for(let i=0;i<4;i++)spawnEnemy('pop',VW+10+i*16,60+i*36,{},b);}},
-     {t:200,fn:b=>{for(let i=0;i<3;i++)spawnEnemy('splitter',VW+10,70+i*55,{},b);}},
-     {t:340,fn:b=>{for(let i=0;i<3;i++)spawnEnemy('wave',VW+10,60+i*50,{amp:45},b);}},
+     {t:80, fn:b=>{for(let i=0;i<4;i++){const e=spawnEnemy('pop',VW+10+i*16,60+i*36,{},b);if(i===1)e.carrier=true;}}},
+     {t:200,fn:b=>{for(let i=0;i<3;i++){const e=spawnEnemy('splitter',VW+10,70+i*55,{},b);if(i===1)e.carrier=true;}}},
+     {t:340,fn:b=>{for(let i=0;i<3;i++){const e=spawnEnemy('wave',VW+10,60+i*50,{amp:45},b);if(i===0)e.carrier=true;}}},
      {t:470,fn:b=>{spawnEnemy('dasher',VW+10,VH/2,{},b);const e=spawnEnemy('pop',VW+10,VH/2,{},b);e.carrier=true;}},
      {t:580,fn:b=>{for(let i=0;i<2;i++){const e=spawnEnemy('turret',VW+10,70+i*80,{},b);if(i===0)e.carrier=true;}}},
-     {t:700,fn:b=>{for(let i=0;i<4;i++)spawnEnemy('splitter',VW+10+i*12,VH/2-50+i*30,{},b);}},
+     {t:700,fn:b=>{for(let i=0;i<4;i++){const e=spawnEnemy('splitter',VW+10+i*12,VH/2-50+i*30,{},b);if(i===1)e.carrier=true;}}},
      {t:840,fn:b=>{for(let i=0;i<5;i++)spawnEnemy('pop',VW+10+i*14,VH/2,{},b);
                    const e=spawnEnemy('pop',VW+10,80,{},b);e.carrier=true;}},
-     {t:980,fn:b=>{spawnEnemy('turret',VW+10,50,{carrier:true},b);for(let i=0;i<3;i++)spawnEnemy('wave',VW+10,90+i*40,{amp:40},b);}},
+     {t:980,fn:b=>{spawnEnemy('turret',VW+10,50,{carrier:true},b);for(let i=0;i<3;i++){const e=spawnEnemy('wave',VW+10,90+i*40,{amp:40},b);if(i===2)e.carrier=true;}}},
      {t:1120,fn:b=>{for(let i=0;i<2;i++)spawnEnemy('dasher',VW+10,80+i*100,{},b);
-                    for(let i=0;i<2;i++)spawnEnemy('splitter',VW+10,VH/2,{},b);}},
-     {t:1280,fn:b=>{for(let i=0;i<4;i++){const e=spawnEnemy('pop',VW+10+i*16,VH/2-30+i*20,{},b);if(i===2)e.carrier=true;}}},
+                    for(let i=0;i<2;i++){const e=spawnEnemy('splitter',VW+10,VH/2,{},b);if(i===0)e.carrier=true;}}},
+     {t:1280,fn:b=>{for(let i=0;i<4;i++){const e=spawnEnemy('pop',VW+10+i*16,VH/2-30+i*20,{},b);if(i===0||i===2)e.carrier=true;}}},
      {t:1420,fn:()=>{G.warning=180;Audio.SE.warning();}},
      {t:1620,fn:b=>{spawnEnemy('boss',VW+30,VH/2,{},b);Audio.playMusic('boss',2,0);banner(STAGES[1].boss,150);}},
    ]},
@@ -262,23 +270,23 @@ const STAGES=[
      ['「ならばこれは、進めという思し召しよ。','俺は、俺の膝を信じる――！」'],
    ],
    waves:[
-     {t:80, fn:b=>{for(let i=0;i<5;i++)spawnEnemy('pop',VW+10+i*14,50+i*34,{},b);}},
-     {t:200,fn:b=>{for(let i=0;i<3;i++)spawnEnemy('homer',VW+10,60+i*70,{},b);}},
-     {t:340,fn:b=>{for(let i=0;i<4;i++)spawnEnemy('wave',VW+10,55+i*42,{amp:48},b);}},
+     {t:80, fn:b=>{for(let i=0;i<5;i++){const e=spawnEnemy('pop',VW+10+i*14,50+i*34,{},b);if(i===2)e.carrier=true;}}},
+     {t:200,fn:b=>{for(let i=0;i<3;i++){const e=spawnEnemy('homer',VW+10,60+i*70,{},b);if(i===1)e.carrier=true;}}},
+     {t:340,fn:b=>{for(let i=0;i<4;i++){const e=spawnEnemy('wave',VW+10,55+i*42,{amp:48},b);if(i===1)e.carrier=true;}}},
      {t:470,fn:b=>{for(let i=0;i<3;i++)spawnEnemy('splitter',VW+10,VH/2-50+i*50,{},b);
                    const e=spawnEnemy('pop',VW+10,VH/2,{},b);e.carrier=true;}},
      {t:600,fn:b=>{spawnEnemy('dasher',VW+10,70,{},b);spawnEnemy('dasher',VW+10,VH-70,{},b);
-                   spawnEnemy('homer',VW+10,VH/2,{},b);}},
+                   const e=spawnEnemy('homer',VW+10,VH/2,{},b);e.carrier=true;}},
      {t:740,fn:b=>{for(let i=0;i<3;i++){const e=spawnEnemy('turret',VW+10,60+i*64,{},b);if(i===1)e.carrier=true;}}},
      {t:880,fn:b=>{for(let i=0;i<2;i++)spawnEnemy('homer',VW+10,80+i*100,{},b);
-                   for(let i=0;i<4;i++)spawnEnemy('pop',VW+10+i*14,VH/2,{},b);}},
-     {t:1020,fn:b=>{for(let i=0;i<4;i++)spawnEnemy('splitter',VW+10+i*12,VH/2-50+i*30,{},b);
-                    const e=spawnEnemy('pop',VW+10,90,{},b);e.carrier=true;}},
+                   for(let i=0;i<4;i++){const e=spawnEnemy('pop',VW+10+i*14,VH/2,{},b);if(i===1)e.carrier=true;}}},
+     {t:1020,fn:b=>{for(let i=0;i<4;i++){const e=spawnEnemy('splitter',VW+10+i*12,VH/2-50+i*30,{},b);if(i===2)e.carrier=true;}
+                    const e2=spawnEnemy('pop',VW+10,90,{},b);e2.carrier=true;}},
      {t:1160,fn:b=>{for(let i=0;i<2;i++)spawnEnemy('dasher',VW+10,90+i*90,{},b);
-                    for(let i=0;i<2;i++)spawnEnemy('homer',VW+10,VH/2-30+i*60,{},b);}},
+                    for(let i=0;i<2;i++){const e=spawnEnemy('homer',VW+10,VH/2-30+i*60,{},b);if(i===0)e.carrier=true;}}},
      {t:1300,fn:b=>{for(let i=0;i<3;i++)spawnEnemy('turret',VW+10,55+i*64,{},b);
                     const e=spawnEnemy('pop',VW+10,VH/2,{},b);e.carrier=true;}},
-     {t:1440,fn:b=>{for(let i=0;i<5;i++)spawnEnemy('pop',VW+10+i*13,VH/2-40+i*20,{},b);}},
+     {t:1440,fn:b=>{for(let i=0;i<5;i++){const e=spawnEnemy('pop',VW+10+i*13,VH/2-40+i*20,{},b);if(i===2)e.carrier=true;}}},
      {t:1560,fn:()=>{G.warning=200;Audio.SE.warning();}},
      {t:1780,fn:b=>{spawnEnemy('boss',VW+30,VH/2,{},b);Audio.playMusic('boss',2,0);banner(STAGES[2].boss,150);}},
    ]},
@@ -289,7 +297,7 @@ const ENDING=[
   ['「膝は前しか向かん。人生も同じこと。','だから人は、前にしか進めん」'],
   ['――かくして光門真理教に、','新たな一節が加わった。'],
   ['なお膝の水は、抜いた。','……酒は、抜かなかった。'],
-  ['― 膝を、大切に。THANK YOU FOR PLAYING ―'],
+  ['― 膝を、大切に ―','THANK YOU FOR PLAYING'],
 ];
 
 /* ---------- チュートリアル ---------- */
@@ -312,7 +320,9 @@ const G={state:'opening',storyLines:[],storyStep:0,storyTimer:0,storyChars:0,aft
   player:null,pBullets:null,eBullets:null,enemies:null,particles:null,capsules:null,floaters:null,nebula:[],
   options:[],posHistory:[],powerBar:-1,
   POWER_NAMES:['SPEED','MISSILE','DOUBLE','LASER','OPTION','SHIELD'],
-  equip:{speed:0,missile:false,double:false,laser:false,options:0,shield:false},shieldHp:0,
+  /* 主砲ティア化：mainTier 0=通常弾, 1=DOUBLE, 2=LASER。
+     補助強化(speed/missile/options/shield)とは独立に保持。 */
+  equip:{speed:0,missile:false,mainTier:0,options:0,shield:false},shieldHp:0,
   score:0,lives:3,bombs:3,combo:0,comboTimer:0,comboMax:0,
   shake:0,hitstop:0,timeScale:1,waveIndex:0,stageTime:0,bgScroll:0,globalT:0,
   warning:0,flash:0,invuln:0,bossExplodeTimer:0,bossExplodePos:null,bannerText:'',bannerTimer:0,endStep:0,endTimer:0,menuTimer:0};
@@ -337,8 +347,8 @@ function startStage(idx){G.stageIndex=idx;const st=STAGES[idx];initPools();
 function newGame(){initPools();initNebula();
   G.player={x:60,y:VH/2,vx:0,vy:0,r:3,shotCd:0,bank:0};
   G.options=[];G.posHistory=[];G.powerBar=-1;
-  G.equip={speed:0,missile:false,double:false,laser:false,options:0,shield:false};G.shieldHp=0;
-  if(CUR_DIFF.startKit){G.equip.speed=2;G.equip.missile=true;G.equip.double=true;}
+  G.equip={speed:0,missile:false,mainTier:0,options:0,shield:false};G.shieldHp=0;
+  if(CUR_DIFF.startKit){G.equip.speed=2;G.equip.missile=true;G.equip.mainTier=1;}
   G.score=0;G.lives=CUR_DIFF.lives;G.bombs=CUR_DIFF.bombs;G.combo=0;G.comboTimer=0;G.comboMax=0;
   beginStory(STAGES[0].story,()=>startStage(0));}
 function beginStory(lines,after){G.storyLines=lines;G.storyStep=0;G.storyTimer=0;G.storyChars=0;
@@ -370,8 +380,8 @@ function gainCapsule(){G.powerBar=(G.powerBar+1)%6;Audio.SE.capsule();}
 function confirmPower(){if(G.powerBar<0)return;const i=G.powerBar,eq=G.equip;
   if(i===0){if(eq.speed<5)eq.speed++;}
   else if(i===1)eq.missile=true;
-  else if(i===2){if(eq.laser)return; eq.double=true;}   // LASER所持時はDOUBLE確定を無視（弱体化防止）
-  else if(i===3){eq.laser=true;eq.double=false;}         // LASERは上位なので常に昇格
+  else if(i===2){if(eq.mainTier<1)eq.mainTier=1;}      // DOUBLE：LASER所持(2)なら据え置き＝弱体化しない
+  else if(i===3){eq.mainTier=2;}                        // LASER：常に最上位へ
   else if(i===4){if(eq.options<4){eq.options++;G.options.push({x:G.player.x,y:G.player.y});}}
   else if(i===5){eq.shield=true;G.shieldHp=3;}
   Audio.SE.powerup();floatText(G.player.x,G.player.y-12,G.POWER_NAMES[i]+'!',50);G.powerBar=-1;}
@@ -382,8 +392,11 @@ function playerHit(){if(G.invuln>0)return false;
   if(G.equip.shield&&G.shieldHp>0){G.shieldHp--;if(G.shieldHp<=0)G.equip.shield=false;
     G.invuln=70;G.shake=8;Audio.SE.hit();spawnParticles(G.player.x,G.player.y,8,150,3);return true;}
   G.lives--;Audio.SE.death();G.shake=16;G.flash=1;G.hitstop=8;spawnParticles(G.player.x,G.player.y,30,200,4);G.combo=0;
-  if(G.equip.options>0){G.equip.options--;G.options.pop();}else if(G.equip.laser)G.equip.laser=false;
-  else if(G.equip.double)G.equip.double=false;else if(G.equip.missile)G.equip.missile=false;
+  /* ロスト優先順：補助→主砲ティア1段。主砲は一気に通常弾へは落とさない */
+  if(G.equip.options>0){G.equip.options--;G.options.pop();}
+  else if(G.equip.shield){G.equip.shield=false;G.shieldHp=0;}
+  else if(G.equip.mainTier>0)G.equip.mainTier--;       // LASER→DOUBLE→通常 と1段ずつ
+  else if(G.equip.missile)G.equip.missile=false;
   else if(G.equip.speed>0)G.equip.speed=Math.max(0,G.equip.speed-1);
   G.invuln=CUR_DIFF.invuln;if(G.lives<0)G.state='over';return true;}
 function useBomb(){if(G.bombs<=0)return;G.bombs--;Audio.SE.bomb();G.flash=1;G.shake=12;G.invuln=Math.max(G.invuln,90);
@@ -403,6 +416,14 @@ function onBossCleared(){if(G.stageIndex<STAGES.length-1){Audio.SE.clear();
     beginStory(STAGES[G.stageIndex+1].story,()=>startStage(G.stageIndex+1));}
   else{Audio.SE.ending();Audio.playMusic('menu',0,0);G.endStep=0;G.endTimer=0;G.state='ending';}}
 
+/* ---------- レーザービーム（連続線分・1本の直線） ---------- */
+/* 各発射点(自機先端・各option先端)から右へ伸びる連続ビームを保持。
+   描画は1本の連なった直線、当たり判定も水平線分で連続判定する。 */
+let laserBeams=[];   // {y, x0} の配列。x0は発射開始X。
+function buildLaserBeams(){laserBeams.length=0;
+  const p=G.player;laserBeams.push({y:p.y,x0:p.x+9});
+  for(const o of G.options)laserBeams.push({y:o.y,x0:o.x+7});}
+
 /* ---------- 更新 ---------- */
 function update(inp){G.globalT++;for(const n of G.nebula)n.ph+=0.005*n.sp;
   if(G.state!=='play')return;
@@ -419,13 +440,38 @@ function update(inp){G.globalT++;for(const n of G.nebula)n.ph+=0.005*n.sp;
   while(G.waveIndex<st.waves.length&&G.stageTime>=st.waves[G.waveIndex].t){st.waves[G.waveIndex].fn(diff);G.waveIndex++;}
   const p=G.player,baseSpd=1.6+G.equip.speed*0.45,spd=inp.slow?baseSpd*0.4:baseSpd;
   p.x+=inp.x*spd;p.y+=inp.y*spd;p.bank=(p.bank||0)*0.8+inp.y*0.2;
-  p.x=Math.max(8,Math.min(VW-8,p.x));p.y=Math.max(8,Math.min(VH-8,p.y));  // 全画面移動可能
+  p.x=Math.max(8,Math.min(VW-8,p.x));p.y=Math.max(8,Math.min(VH-8,p.y));
   G.posHistory.unshift({x:p.x,y:p.y});if(G.posHistory.length>200)G.posHistory.pop();
   for(let i=0;i<G.options.length;i++){const idx=Math.min((i+1)*22,G.posHistory.length-1);
     const tp=G.posHistory[idx];if(tp){G.options[i].x=tp.x;G.options[i].y=tp.y;}}
   if(p.shotCd>0)p.shotCd--;
-  if(inp.fire&&p.shotCd<=0){fireWeapon(p.x+8,p.y);for(const o of G.options)fireWeapon(o.x+6,o.y);
-    p.shotCd=G.equip.laser?5:7;G.equip.laser?Audio.SE.laser():Audio.SE.shot();}
+  const isLaser=G.equip.mainTier===2;
+  if(isLaser){
+    // レーザーは連続ビーム。発射点を毎フレーム更新し、線分で当たり判定。
+    buildLaserBeams();
+    if(inp.fire){
+      // ビームDPS：各フレーム、ビーム線上の敵にダメージ
+      for(const beam of laserBeams){
+        G.enemies.forEach(e=>{if(!e.active)return;
+          if(e.x>=beam.x0-e.r && Math.abs(e.y-beam.y)<e.r+3){
+            e.hp-=0.55;e.hitFlash=3;
+            if(Math.random()<0.4)spawnParticles(e.x-e.r,e.y,1,55,1.2);
+            if(e.hp<=0)killEnemy(e);}});
+      }
+      if(p.shotCd<=0){Audio.SE.laser();p.shotCd=4;}
+      // ミサイルはレーザー中も併用
+      if(G.equip.missile && p.shotCd>=3){ /* missileは下のfireWeapon系では出さず個別に */ }
+    }
+    // レーザー中でもミサイルを撃つ
+    if(inp.fire && G.equip.missile && (G.globalT%8===0)){
+      const m=G.pBullets.spawn();m.x=p.x+6;m.y=p.y+2;m.vx=4;m.vy=2.5;m.type='missile';m.r=2.5;
+      for(const o of G.options){const m2=G.pBullets.spawn();m2.x=o.x+5;m2.y=o.y+2;m2.vx=4;m2.vy=2.5;m2.type='missile';m2.r=2.5;}
+    }
+  } else {
+    laserBeams.length=0;
+    if(inp.fire&&p.shotCd<=0){fireWeapon(p.x+8,p.y);for(const o of G.options)fireWeapon(o.x+6,o.y);
+      p.shotCd=7;Audio.SE.shot();}
+  }
   if(inp.confirm)confirmPower();if(inp.bomb)useBomb();
   G.pBullets.forEach(b=>{b.x+=b.vx;b.y+=b.vy;if(b.x>VW+20||b.x<-20||b.y<-20||b.y>VH+20)b.active=false;});
   G.capsules.forEach(c=>{c.x+=c.vx;c.y+=c.vy;c.t++;if(c.x<-20)c.active=false;
@@ -455,8 +501,8 @@ function update(inp){G.globalT++;for(const n of G.nebula)n.ph+=0.005*n.sp;
       if(e.x<-30)e.active=false;}
     if(circleHit(e.x,e.y,e.r,p.x,p.y,p.r))playerHit();});
   G.pBullets.forEach(b=>{if(!b.active)return;G.enemies.forEach(e=>{if(!e.active)return;
-    if(circleHit(b.x,b.y,b.r,e.x,e.y,e.r)){if(b.type!=='laser')b.active=false;
-      e.hp-=b.type==='laser'?0.6:(b.type==='missile'?2:1);e.hitFlash=4;Audio.SE.hit();
+    if(circleHit(b.x,b.y,b.r,e.x,e.y,e.r)){b.active=false;
+      e.hp-=(b.type==='missile'?2:1);e.hitFlash=4;Audio.SE.hit();
       spawnParticles(b.x,b.y,2,50,1.5);if(e.hp<=0)killEnemy(e);}});});
   G.eBullets.forEach(b=>{
     if(b.homing&&b.life>0){b.life--;const dx=p.x-b.x,dy=p.y-b.y,d=Math.hypot(dx,dy)||1;
@@ -467,9 +513,9 @@ function update(inp){G.globalT++;for(const n of G.nebula)n.ph+=0.005*n.sp;
   G.particles.forEach(pt=>{pt.x+=pt.vx;pt.y+=pt.vy;pt.vx*=0.94;pt.vy*=0.94;pt.life--;if(pt.life<=0)pt.active=false;});
   G.floaters.forEach(f=>{f.y+=f.vy;f.life--;if(f.life<=0)f.active=false;});}
 function fireWeapon(x,y){const eq=G.equip;
-  if(eq.laser){const b=G.pBullets.spawn();b.x=x;b.y=y;b.vx=9;b.vy=0;b.type='laser';b.r=3;}
-  else{const b=G.pBullets.spawn();b.x=x;b.y=y;b.vx=7;b.vy=0;b.type='normal';b.r=2;
-    if(eq.double){const d=G.pBullets.spawn();d.x=x;d.y=y;d.vx=6;d.vy=-3;d.type='normal';d.r=2;}}
+  // 主砲ティア0=通常, 1=DOUBLE（LASERはupdate側で連続処理）
+  const b=G.pBullets.spawn();b.x=x;b.y=y;b.vx=7;b.vy=0;b.type='normal';b.r=2;
+  if(eq.mainTier>=1){const d=G.pBullets.spawn();d.x=x;d.y=y;d.vx=6;d.vy=-3;d.type='normal';d.r=2;}
   if(eq.missile){const m=G.pBullets.spawn();m.x=x;m.y=y+2;m.vx=4;m.vy=2.5;m.type='missile';m.r=2.5;}}
 function updateBoss(e){const fm=CUR_DIFF.fireMul;
   if(e.x>VW-90)e.x+=e.vx;else e.y=VH/2+Math.sin(e.t*0.02)*60;
@@ -500,6 +546,26 @@ function drawBackground(){const st=STAGES[G.stageIndex]||STAGES[0];
 function drawStarLayer(li,speed,color,size){const arr=starSeed[li];if(!arr)return;ctx.fillStyle=color;
   const off=(G.bgScroll*speed)%VW;for(const st of arr){let x=st.x-off;if(x<0)x+=VW;ctx.fillRect(x,st.y,size,size);}}
 function hexA(hex,a){const h=hex.replace('#','');return 'rgba('+parseInt(h.substr(0,2),16)+','+parseInt(h.substr(2,2),16)+','+parseInt(h.substr(4,2),16)+','+a+')';}
+function drawLaserBeams(inp){
+  if(!(G.equip.mainTier===2)||!inp.fire||laserBeams.length===0)return;
+  ctx.globalCompositeOperation='lighter';
+  const flick=0.85+0.15*Math.sin(G.globalT*0.8);
+  for(const beam of laserBeams){
+    const x0=beam.x0,x1=VW+4,y=beam.y;
+    // 外側グロー（太い帯）
+    const g=ctx.createLinearGradient(0,y-6,0,y+6);
+    g.addColorStop(0,'rgba(120,200,255,0)');g.addColorStop(0.5,'rgba(120,200,255,'+(0.45*flick)+')');g.addColorStop(1,'rgba(120,200,255,0)');
+    ctx.fillStyle=g;ctx.fillRect(x0,y-6,x1-x0,12);
+    // 中核（白い1本の直線）
+    ctx.fillStyle='rgba(220,240,255,'+flick+')';ctx.fillRect(x0,y-2,x1-x0,4);
+    ctx.fillStyle='rgba(255,255,255,'+flick+')';ctx.fillRect(x0,y-0.8,x1-x0,1.6);
+    // 発射口の輝き
+    const cg=ctx.createRadialGradient(x0,y,0,x0,y,7);
+    cg.addColorStop(0,'rgba(255,255,255,'+flick+')');cg.addColorStop(1,'rgba(120,200,255,0)');
+    ctx.fillStyle=cg;ctx.beginPath();ctx.arc(x0,y,7,0,Math.PI*2);ctx.fill();
+  }
+  ctx.globalCompositeOperation='source-over';
+}
 function drawPlayer(inp){const p=G.player;if(!p)return;
   const blink=G.invuln>0&&Math.floor(G.invuln/4)%2===0&&G.lives>=0;
   if(!blink){const bank=p.bank||0;ctx.save();ctx.translate(p.x,p.y);
@@ -526,10 +592,7 @@ function drawPlayer(inp){const p=G.player;if(!p)return;
     ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(o.x,o.y,2,0,Math.PI*2);ctx.fill();}
   ctx.globalCompositeOperation='source-over';}
 function drawPlayerBullets(){ctx.globalCompositeOperation='lighter';
-  G.pBullets.forEach(b=>{if(b.type==='laser'){const g=ctx.createLinearGradient(b.x-7,0,b.x+7,0);
-      g.addColorStop(0,'rgba(160,220,255,0)');g.addColorStop(0.5,'#dff0ff');g.addColorStop(1,'rgba(160,220,255,0)');
-      ctx.fillStyle=g;ctx.fillRect(b.x-8,b.y-3,16,6);ctx.fillStyle='#fff';ctx.fillRect(b.x-7,b.y-1,14,2);}
-    else if(b.type==='missile'){ctx.fillStyle='#ffd0a0';ctx.beginPath();ctx.ellipse(b.x,b.y,3,1.6,0,0,Math.PI*2);ctx.fill();}
+  G.pBullets.forEach(b=>{if(b.type==='missile'){ctx.fillStyle='#ffd0a0';ctx.beginPath();ctx.ellipse(b.x,b.y,3,1.6,0,0,Math.PI*2);ctx.fill();}
     else{ctx.fillStyle='#cfe9ff';ctx.beginPath();ctx.ellipse(b.x,b.y,3,1.4,0,0,Math.PI*2);ctx.fill();
       ctx.fillStyle='#fff';ctx.fillRect(b.x-1,b.y-0.7,2,1.4);}});
   ctx.globalCompositeOperation='source-over';}
@@ -611,7 +674,7 @@ function drawHUD(){ctx.textAlign='left';ctx.fillStyle='rgba(0,0,0,0.45)';ctx.fil
     ctx.fillText(G.combo+' 連 x'+mult,VW/2,11);ctx.textAlign='left';}
   const names=G.POWER_NAMES,jp=['速','弾','双','光','分','盾'],bw=isTouch?54:72,bh=12,gap=2,total=names.length*(bw+gap),sx=isTouch?6:(VW-total)/2,y=VH-bh-4;
   for(let i=0;i<names.length;i++){const x=sx+i*(bw+gap),lit=i===G.powerBar;
-    const owned=(i===0&&G.equip.speed>0)||(i===1&&G.equip.missile)||(i===2&&G.equip.double)||(i===3&&G.equip.laser)||(i===4&&G.equip.options>0)||(i===5&&G.equip.shield);
+    const owned=(i===0&&G.equip.speed>0)||(i===1&&G.equip.missile)||(i===2&&G.equip.mainTier>=1)||(i===3&&G.equip.mainTier>=2)||(i===4&&G.equip.options>0)||(i===5&&G.equip.shield);
     ctx.fillStyle=lit?'#ffd23e':(owned?'#3a5a8a':'rgba(255,255,255,0.08)');ctx.fillRect(x,y,bw,bh);
     ctx.strokeStyle=lit?'#fff':'rgba(255,255,255,0.3)';ctx.lineWidth=1;ctx.strokeRect(x+0.5,y+0.5,bw-1,bh-1);
     ctx.fillStyle=lit?'#000':(owned?'#fff':'#889');ctx.font='7px serif';ctx.textAlign='center';
@@ -625,10 +688,6 @@ function drawVignette(){const g=ctx.createRadialGradient(VW/2,VH/2,VH*0.35,VW/2,
   g.addColorStop(0,'rgba(0,0,0,0)');g.addColorStop(1,'rgba(0,0,0,0.4)');ctx.fillStyle=g;ctx.fillRect(0,0,VW,VH);}
 
 /* ---------- メニュー/ストーリー/チュートリアル ---------- */
-function drawTitleImage(cx,cy,maxW,maxH){
-  if(titleImgOK){const iw=titleImg.width,ih=titleImg.height,r=Math.min(maxW/iw,maxH/ih);
-    const w=iw*r,h=ih*r;ctx.drawImage(titleImg,cx-w/2,cy-h/2,w,h);return true;}
-  return false;}
 function drawLogoFallback(cx,cy,t){ctx.textAlign='center';const pulse=0.6+0.4*Math.sin(t*0.05);
   ctx.shadowColor='#4ea1ff';ctx.shadowBlur=14*pulse;ctx.fillStyle='#fff';ctx.font='bold 44px serif';ctx.fillText('膝',cx,cy);
   ctx.shadowBlur=6*pulse;ctx.fillStyle='#cfe2ff';ctx.font='bold 22px serif';ctx.fillText('HIZA Shooting',cx,cy+30);
@@ -703,15 +762,32 @@ function drawResult(){drawBackground();ctx.textAlign='center';
   ctx.textAlign='left';drawVignette();}
 function drawEnding(){drawBackground();ctx.textAlign='center';
   const lines=ENDING[G.endStep]||[],a=Math.min(1,G.endTimer/40),last=G.endStep>=ENDING.length-1;
-  ctx.fillStyle=last?'rgba(255,255,255,'+Math.min(1,G.endTimer/40)+')':'rgba(245,245,245,'+a+')';
-  ctx.font=last?'bold 13px serif':'12px serif';
-  const lineH=20,totalH=lines.length*lineH,startY=VH/2-totalH/2+lineH-6;
-  for(let i=0;i<lines.length;i++)ctx.fillText(lines[i],VW/2,startY+i*lineH);
-  if(last){ctx.fillStyle='#ddd';ctx.font='11px serif';ctx.fillText('得点 '+G.score,VW/2,VH/2+38);
-    ctx.fillText('最大連 '+G.comboMax+' ['+CUR_DIFF.label+']',VW/2,VH/2+54);
-    if(Math.floor(G.endTimer/30)%2===0){ctx.fillStyle='#bbb';ctx.font='10px serif';ctx.fillText(isTouch?'［ タップでタイトルへ ］':'［ Z／タップでタイトルへ ］',VW/2,VH-14);}}
-  else{ctx.fillStyle='rgba(200,200,200,'+(0.5*a)+')';ctx.font='9px serif';
-    if(Math.floor(G.endTimer/30)%2===0)ctx.fillText('［ タップで次へ ］',VW/2,VH-14);}
+  if(last){
+    // 難易度別 正方形スペシャル画像を中央に表示（読み込み成功時のみ）
+    const dk=CUR_DIFF.key;const im=congratsImg[dk];const ok=congratsOK[dk];
+    const imgSize=96,imgY=VH/2-58;
+    if(ok&&im.width>0){
+      const ia=Math.min(1,G.endTimer/50);ctx.globalAlpha=ia;
+      // 枠（白）
+      ctx.fillStyle='rgba(255,255,255,0.92)';roundRect(VW/2-imgSize/2-4,imgY-imgSize/2-4,imgSize+8,imgSize+8,6);ctx.fill();
+      // 正方形にクロップ表示
+      const s=Math.min(im.width,im.height),sx=(im.width-s)/2,sy=(im.height-s)/2;
+      ctx.drawImage(im,sx,sy,s,s,VW/2-imgSize/2,imgY-imgSize/2,imgSize,imgSize);
+      ctx.globalAlpha=1;
+    }
+    ctx.fillStyle='#fff';ctx.font='bold 13px serif';
+    ctx.fillText(lines[0]||'',VW/2,imgY+imgSize/2+22);
+    ctx.fillText(lines[1]||'',VW/2,imgY+imgSize/2+40);
+    ctx.fillStyle='#ddd';ctx.font='10px serif';
+    ctx.fillText('得点 '+G.score+'　最大連 '+G.comboMax+' ['+CUR_DIFF.label+']',VW/2,imgY+imgSize/2+58);
+    if(Math.floor(G.endTimer/30)%2===0){ctx.fillStyle='#bbb';ctx.font='10px serif';ctx.fillText(isTouch?'［ タップでタイトルへ ］':'［ Z／タップでタイトルへ ］',VW/2,VH-12);}
+  } else {
+    ctx.fillStyle='rgba(245,245,245,'+a+')';ctx.font='12px serif';
+    const lineH=20,totalH=lines.length*lineH,startY=VH/2-totalH/2+lineH-6;
+    for(let i=0;i<lines.length;i++)ctx.fillText(lines[i],VW/2,startY+i*lineH);
+    ctx.fillStyle='rgba(200,200,200,'+(0.5*a)+')';ctx.font='9px serif';
+    if(Math.floor(G.endTimer/30)%2===0)ctx.fillText('［ タップで次へ ］',VW/2,VH-14);
+  }
   ctx.textAlign='left';drawVignette();}
 
 function render(inp){ctx.clearRect(0,0,VW,VH);
@@ -727,7 +803,7 @@ function render(inp){ctx.clearRect(0,0,VW,VH);
   if(G.state==='diff'){drawDiffSelect();return;}if(G.state==='ending'){drawEnding();return;}
   let sx=0,sy=0;if(G.shake>0.5){sx=(Math.random()*2-1)*G.shake;sy=(Math.random()*2-1)*G.shake;}
   ctx.save();ctx.translate(sx,sy);drawBackground();
-  drawCapsules();drawPlayerBullets();drawEnemies();drawPlayer(inp);drawEnemyBullets();drawParticles();drawFloaters();ctx.restore();
+  drawCapsules();drawPlayerBullets();drawLaserBeams(inp);drawEnemies();drawPlayer(inp);drawEnemyBullets();drawParticles();drawFloaters();ctx.restore();
   if(G.flash>0){ctx.fillStyle='rgba(255,255,255,'+Math.min(0.8,G.flash)+')';ctx.fillRect(0,0,VW,VH);}
   drawVignette();drawHUD();drawVButtons();
   if(G.warning>0&&Math.floor(G.warning/8)%2===0){ctx.textAlign='center';ctx.fillStyle='#f55';ctx.font='bold 20px serif';
