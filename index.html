@@ -22,12 +22,15 @@
 <script>
 "use strict";
 /* =========================================================================
-   HIZA Shooting v7
-   - v6を土台に画質設定維持（imageSmoothing=true / DPR対応）
-   - タイトル画像は hiza.jpg 相対パス読込（crossOrigin解除）
-   - Xキー preventDefault追加（入力取りこぼし予防）
-   - 難易度タップ選択（v6方式）維持
-   - ストーリー最新版移植：光門真理教 / ハードボイルド / 酒 / 膝
+   HIZA Shooting v8
+   - 自機 全画面移動可能化（右制限撤廃）
+   - 装備の弱体化防止（LASER所持時にDOUBLE確定を無視）
+   - チュートリアルページ追加（タイトルから導線）
+   - タイトルを「はじめる / 遊び方」2択メニュー化
+   - 画質：imageSmoothing=true / DPR対応（劣化させない）
+   - タイトル画像 hiza.jpg 相対パス読込
+   - Xキー preventDefault / blurで押下リセット
+   - ストーリー：光門真理教 / ハードボイルド / 酒 / 膝
      「膝は前しか向かん」を 軽口→信条→教義 の三段で回収
    ========================================================================= */
 const VW=480,VH=270;
@@ -149,7 +152,7 @@ const Input=(()=>{
     if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space','KeyZ','KeyX','KeyC'].includes(e.code))e.preventDefault();});
   window.addEventListener('keyup',e=>{keys[e.code]=false;
     if(['KeyZ','KeyX','KeyC'].includes(e.code))e.preventDefault();});
-  window.addEventListener('blur',()=>{for(const k in keys)keys[k]=false;}); // フォーカス喪失で押下リセット
+  window.addEventListener('blur',()=>{for(const k in keys)keys[k]=false;});
   const touches={};let moveX=0,moveY=0,moveAct=false,fireHold=false;
   let vbtn={slow:false,confirm:false,bomb:false},tEdge=false,tapPoint=null,cReq=false,bReq=false;
   function toL(cx,cy){const r=cv.getBoundingClientRect();return{x:(cx-r.left)/scale,y:(cy-r.top)/scale};}
@@ -195,23 +198,18 @@ class Pool{constructor(f,n){this.items=[];this.factory=f;for(let i=0;i<n;i++){co
   forEach(fn){for(const o of this.items)if(o.active)fn(o);}}
 
 /* =========================================================================
-   ステージ定義（延長 + 敵バリエーション + 最新ストーリー）
-   ストーリー方針：
-   - Stage1: 安鳴の紹介。「膝は前しか向かん」を軽口として初出
-   - Stage2: 酒・布教・光門真理教
-   - Stage3: 膝に水。「膝は前しか向かん」を信条へ転調
-   - Ending: 「前にしか進めん」で教義化（光門真理教の一節へ）
+   ステージ定義
    ========================================================================= */
 const STAGES=[
   {name:'第一霊脈 ― 朝靄の幹線道路',boss:'暴走配送ドローン「ガルガン号」',mus:'stage1',
    bgA:'#0a0e1a',bgB:'#1a2440',neb:'#3a5a9a',star:'#9fd2ff',key:0,
    story:[
-     ['光門寺の住職、安鳴（あんめい）。','齢、五十路手前。膝が悲鳴を上げている。'],
-     ['「正座はとうに捨てた。','歩きの托鉢も、この膝にゃ重すぎる注文でな」'],
-     ['寺の蔵に眠っていた最新鋭の戦闘機。','「これで檀家を回る。','膝に優しい布教ってやつさ」'],
+     ['光門寺の住職、安鳴。','齢、五十路手前。膝が悲鳴を上げている。'],
+     ['「正座はとうに捨てた。','徒歩での托鉢は、この膝にゃ重すぎる注文でな」'],
+     ['うちの蔵に眠っていた最新鋭の戦闘機。','「これで檀家を回る。','膝に優しい移動方法ってやつだな」'],
      ['――なぜ蔵に戦闘機があるか。','「説法より長くなる。省くぜ」'],
-     ['一杯ひっかけて、いざ出陣。','「膝の酒の回りが、早い。','……まあいい」'],
-     ['離陸した途端、空は機械の群れ。','「膝は前しか向かん。','なら、行くしかあるまい」'],
+     ['一杯ひっかけて、いざ出陣。','「今日は酒の回りが、早い。','……まあいい」'],
+     ['離陸した途端、空は機械の群れ。','「俺の邪魔をするか。','悪いが、容赦はしねえ」'],
    ],
    waves:[
      {t:80, fn:b=>{for(let i=0;i<4;i++)spawnEnemy('pop',VW+10,50+i*45,{},b);}},
@@ -232,9 +230,9 @@ const STAGES=[
   {name:'第二霊脈 ― 弔いの渋滞空域',boss:'巨大集合住宅「ヴォルテクス団地」',mus:'stage2',
    bgA:'#1a0a12',bgB:'#3a1020',neb:'#9a3050',star:'#ffb0c8',key:-2,
    story:[
-     ['一体目を蹴散らした安鳴。','「布教ってのは、まず黙らせてからだ」'],
-     ['腰のフラスコをあおる。','「……ぷはあ。膝にゃ響くが、','こいつがねえと法話に魂が乗らねえ」'],
-     ['安鳴が広めるは新興宗教、光門真理教。','「教義は単純。膝を労われ、酒は程々に。','……俺が言えた義理じゃねえがな」'],
+     ['一体目を蹴散らした安鳴。','「教えを説くにも、まず黙らせてからだな」'],
+     ['腰の泡盛をあおる。','「……膝にゃ響くが、','こいつがねえと法話に魂が乗らねえ」'],
+     ['安鳴が広めるは新興宗教、光門真理教。','「教義は単純。「膝を大事に」。','……俺が言えた義理じゃねえがな」'],
      ['敵機は増える一方。','分裂する機雷が、紅い空を埋めていく。'],
      ['「一周忌に遅れたら檀家に顔が立たん。','南無……アクセル全開といくか」'],
    ],
@@ -257,11 +255,11 @@ const STAGES=[
   {name:'第三霊脈 ― 膝に水が溜まる空',boss:'関節破壊機関「オーバーマインド」',mus:'stage3',
    bgA:'#0a1410',bgB:'#0f2a1c',neb:'#2a8a5a',star:'#aef5c8',key:-4,
    story:[
-     ['「……いかん。膝に、水が溜まってきた」','曲げるたび、海が鳴る。'],
-     ['「昨夜の酒が、今ごろ膝で暴れてやがる」','安鳴の額に、脂汗。'],
-     ['引き返すなら、今だ。','寺は、まだ後ろにある。'],
-     ['――だが安鳴は、アクセルを緩めない。','「膝は前しか向かん。','後ろを向く関節を、仏はくれなんだ」'],
-     ['「ならばこれは、進めという思し召しよ。','成仏は、法事を済ませてからだ――！」'],
+     ['「……いかん。膝に、水が溜まってきた」','曲げるたび、海を感じる。'],
+     ['「酒が、今ごろ膝で暴れてやがる」','安鳴の額には、脂汗。'],
+     ['引き返すなら、今かもしれない。','そもそも飲酒運転である。'],
+     ['――だが安鳴は、アクセルを緩めない。','「膝は前しか向かん。','後ろを向く関節を、神さんは作らなんだ」'],
+     ['「ならばこれは、進めという思し召しよ。','俺は、俺の膝を信じる――！」'],
    ],
    waves:[
      {t:80, fn:b=>{for(let i=0;i<5;i++)spawnEnemy('pop',VW+10+i*14,50+i*34,{},b);}},
@@ -287,18 +285,30 @@ const STAGES=[
 ];
 const ENDING=[
   ['関節破壊機関は、塵となって散った。','空に、ようやく静けさが戻る。'],
-  ['安鳴は機を降り、痛む膝をさすって笑う。','「檀家は、無事だ。法事を始めようか」'],
-  ['「人生も同じよ。膝は前しか向かん。','だから人は、前にしか進めん」'],
+  ['安鳴は機を降り、痛む膝をさすって笑う。','「さて。法事を始めようか」'],
+  ['「膝は前しか向かん。人生も同じこと。','だから人は、前にしか進めん」'],
   ['――かくして光門真理教に、','新たな一節が加わった。'],
-  ['なお膝の水は、抜いた。酒も、しばらく抜いた。','……しばらく、だ。'],
-  ['― 膝、大事に。THANK YOU FOR PLAYING ―'],
+  ['なお膝の水は、抜いた。','……酒は、抜かなかった。'],
+  ['― 膝を、大切に。THANK YOU FOR PLAYING ―'],
+];
+
+/* ---------- チュートリアル ---------- */
+const TUTORIAL=[
+  {title:'遊び方 ①　基本操作',
+   lines:['膝を労りながら、敵を倒し檀家のもとへ急げ。','','PC：移動＝矢印キー／WASD','　　 発射＝Z　　低速＝Shift','スマホ：左半分ドラッグで移動','　　　　 右半分タップで連射','','低速移動は弾をよけやすくなる。']},
+  {title:'遊び方 ②　膝アイテムの取得',
+   lines:['一部の敵は「膝」マークを抱えている。','これを倒すと「膝カプセル」が出現。','','カプセルに触れて取得すると、','画面下の パワーバー が1つ進む。','','まだ装備はされない。次が肝心。']},
+  {title:'遊び方 ③　装備の確定',
+   lines:['パワーバーで光っている枠が、','今 装備できる強化の種類。','','PC：X キー　／　スマホ：装備ボタン','　を押すと、その強化が確定する。','','カプセルを多く取るほどバーは進み、','より強力な強化を選べるようになる。']},
+  {title:'遊び方 ④　強化の種類',
+   lines:['速 SPEED：移動速度アップ','弾 MISSILE：地を這う追加弾','双 DOUBLE：斜め上にも撃つ','光 LASER：貫通する強力なレーザー','分 OPTION：自機を追う分身（最大4）','盾 SHIELD：3回まで被弾を防ぐ','','法力（ボム）は画面全体を一掃する。']},
 ];
 
 /* =========================================================================
    状態
    ========================================================================= */
 const G={state:'opening',storyLines:[],storyStep:0,storyTimer:0,storyChars:0,afterStory:null,
-  diffSel:1,stageIndex:0,
+  diffSel:1,stageIndex:0,titleSel:0,tutoStep:0,
   player:null,pBullets:null,eBullets:null,enemies:null,particles:null,capsules:null,floaters:null,nebula:[],
   options:[],posHistory:[],powerBar:-1,
   POWER_NAMES:['SPEED','MISSILE','DOUBLE','LASER','OPTION','SHIELD'],
@@ -358,8 +368,10 @@ function spawnEnemy(type,x,y,opts={},diff=1){const e=G.enemies.spawn();
 /* ---------- パワーアップ/コンボ/被弾 ---------- */
 function gainCapsule(){G.powerBar=(G.powerBar+1)%6;Audio.SE.capsule();}
 function confirmPower(){if(G.powerBar<0)return;const i=G.powerBar,eq=G.equip;
-  if(i===0){if(eq.speed<5)eq.speed++;}else if(i===1)eq.missile=true;
-  else if(i===2){eq.double=true;eq.laser=false;}else if(i===3){eq.laser=true;eq.double=false;}
+  if(i===0){if(eq.speed<5)eq.speed++;}
+  else if(i===1)eq.missile=true;
+  else if(i===2){if(eq.laser)return; eq.double=true;}   // LASER所持時はDOUBLE確定を無視（弱体化防止）
+  else if(i===3){eq.laser=true;eq.double=false;}         // LASERは上位なので常に昇格
   else if(i===4){if(eq.options<4){eq.options++;G.options.push({x:G.player.x,y:G.player.y});}}
   else if(i===5){eq.shield=true;G.shieldHp=3;}
   Audio.SE.powerup();floatText(G.player.x,G.player.y-12,G.POWER_NAMES[i]+'!',50);G.powerBar=-1;}
@@ -407,7 +419,7 @@ function update(inp){G.globalT++;for(const n of G.nebula)n.ph+=0.005*n.sp;
   while(G.waveIndex<st.waves.length&&G.stageTime>=st.waves[G.waveIndex].t){st.waves[G.waveIndex].fn(diff);G.waveIndex++;}
   const p=G.player,baseSpd=1.6+G.equip.speed*0.45,spd=inp.slow?baseSpd*0.4:baseSpd;
   p.x+=inp.x*spd;p.y+=inp.y*spd;p.bank=(p.bank||0)*0.8+inp.y*0.2;
-  p.x=Math.max(8,Math.min(VW*0.6,p.x));p.y=Math.max(8,Math.min(VH-8,p.y));
+  p.x=Math.max(8,Math.min(VW-8,p.x));p.y=Math.max(8,Math.min(VH-8,p.y));  // 全画面移動可能
   G.posHistory.unshift({x:p.x,y:p.y});if(G.posHistory.length>200)G.posHistory.pop();
   for(let i=0;i<G.options.length;i++){const idx=Math.min((i+1)*22,G.posHistory.length-1);
     const tp=G.posHistory[idx];if(tp){G.options[i].x=tp.x;G.options[i].y=tp.y;}}
@@ -467,7 +479,7 @@ function updateBoss(e){const fm=CUR_DIFF.fireMul;
       if(CUR_DIFF.omni&&hr<0.45){for(let i=0;i<8;i++){const a=i/8*Math.PI*2+e.t*0.05;spawnEB(e.x,e.y,Math.cos(a)*1.2,Math.sin(a)*1.2,200);}}}}}
 
 /* =========================================================================
-   描画（宇宙ベース + ステージ別カラーテーマ）
+   描画
    ========================================================================= */
 let starSeed=[];
 function initStars(){starSeed=[];for(let l=0;l<3;l++){const a=[];for(let i=0;i<40;i++)a.push({x:Math.random()*VW,y:Math.random()*VH});starSeed.push(a);}}
@@ -480,7 +492,6 @@ function drawBackground(){const st=STAGES[G.stageIndex]||STAGES[0];
     g.addColorStop(0,hexA(st.neb,0.22));g.addColorStop(1,hexA(st.neb,0));ctx.fillStyle=g;ctx.beginPath();ctx.arc(x,yy,rr,0,Math.PI*2);ctx.fill();}
   ctx.globalCompositeOperation='source-over';
   drawStarLayer(0,0.5,'rgba(120,140,180,0.6)',1);drawStarLayer(1,1.0,'rgba(180,200,230,0.8)',1.4);drawStarLayer(2,2.0,st.star,2);
-  // 第三霊脈：膝に溜まる水
   if(G.stageIndex===2&&G.state==='play'){
     const wl=VH-Math.min(VH*0.55,G.stageTime*0.035);
     ctx.fillStyle='rgba(47,224,138,0.10)';ctx.beginPath();ctx.moveTo(0,VH);
@@ -613,7 +624,7 @@ function drawHUD(){ctx.textAlign='left';ctx.fillStyle='rgba(0,0,0,0.45)';ctx.fil
 function drawVignette(){const g=ctx.createRadialGradient(VW/2,VH/2,VH*0.35,VW/2,VH/2,VH*0.85);
   g.addColorStop(0,'rgba(0,0,0,0)');g.addColorStop(1,'rgba(0,0,0,0.4)');ctx.fillStyle=g;ctx.fillRect(0,0,VW,VH);}
 
-/* ---------- メニュー/ストーリー ---------- */
+/* ---------- メニュー/ストーリー/チュートリアル ---------- */
 function drawTitleImage(cx,cy,maxW,maxH){
   if(titleImgOK){const iw=titleImg.width,ih=titleImg.height,r=Math.min(maxW/iw,maxH/ih);
     const w=iw*r,h=ih*r;ctx.drawImage(titleImg,cx-w/2,cy-h/2,w,h);return true;}
@@ -625,11 +636,9 @@ function drawLogoFallback(cx,cy,t){ctx.textAlign='center';const pulse=0.6+0.4*Ma
 function drawStory(){drawBackground();ctx.textAlign='center';const lines=G.storyLines[G.storyStep]||[];
   const full=lines.join('\n');G.storyChars=Math.min(G.storyChars+0.8,full.length);
   const shown=Math.floor(G.storyChars);const a=Math.min(1,G.storyTimer/20);
-  // 枠
   const boxY=VH/2-46,boxH=82;
   ctx.fillStyle='rgba(0,0,0,'+(0.6*a)+')';ctx.fillRect(30,boxY,VW-60,boxH);
   ctx.strokeStyle='rgba(255,255,255,'+(0.4*a)+')';ctx.lineWidth=1;ctx.strokeRect(30.5,boxY+0.5,VW-61,boxH-1);
-  // ★枠内・垂直中央配置：総行数から中央寄せ
   const lineH=19,totalH=lines.length*lineH;
   const startY=boxY+boxH/2-totalH/2+lineH-6;
   ctx.fillStyle='rgba(245,245,245,'+a+')';ctx.font='12px serif';
@@ -639,20 +648,35 @@ function drawStory(){drawBackground();ctx.textAlign='center';const lines=G.story
   ctx.fillStyle='rgba(200,200,200,'+(0.5*a)+')';ctx.font='9px serif';
   if(Math.floor(G.storyTimer/30)%2===0)ctx.fillText(isTouch?'［ タップで次へ ］':'［ Z／タップで次へ ］',VW/2,VH-14);
   ctx.textAlign='left';drawVignette();}
+function drawTutorial(){drawBackground();ctx.textAlign='center';
+  const page=TUTORIAL[G.tutoStep]||TUTORIAL[0];
+  const bx=34,by=30,bw=VW-68,bh=VH-72;
+  ctx.fillStyle='rgba(0,0,0,0.62)';ctx.fillRect(bx,by,bw,bh);
+  ctx.strokeStyle='rgba(255,255,255,0.4)';ctx.lineWidth=1;ctx.strokeRect(bx+0.5,by+0.5,bw-1,bh-1);
+  ctx.fillStyle='#ffd23e';ctx.font='bold 13px serif';ctx.fillText(page.title,VW/2,by+22);
+  ctx.fillStyle='#eef4ff';ctx.font='11px serif';
+  const lineH=16,startY=by+46;
+  for(let i=0;i<page.lines.length;i++)ctx.fillText(page.lines[i],VW/2,startY+i*lineH);
+  ctx.fillStyle='#9fb8d8';ctx.font='9px serif';
+  ctx.fillText((G.tutoStep+1)+' / '+TUTORIAL.length,VW/2,VH-26);
+  if(Math.floor(G.menuTimer/30)%2===0){const last=G.tutoStep>=TUTORIAL.length-1;
+    ctx.fillStyle='#fff';ctx.fillText(isTouch?(last?'［ タップでタイトルへ ］':'［ タップで次へ ］'):(last?'［ Z／Escでタイトルへ ］':'［ Zで次へ／Escで戻る ］'),VW/2,VH-12);}
+  ctx.textAlign='left';drawVignette();}
 function drawTitle(){
   drawBackground();
-  // 画像の視認性確保：白い台座を敷く
-  if(titleImgOK){const iw=titleImg.width,ih=titleImg.height,r=Math.min(300/iw,150/ih);
-    const w=iw*r,h=ih*r,cx=VW/2,cy=96;
+  if(titleImgOK){const iw=titleImg.width,ih=titleImg.height,r=Math.min(300/iw,140/ih);
+    const w=iw*r,h=ih*r,cx=VW/2,cy=88;
     ctx.fillStyle='rgba(255,255,255,0.92)';roundRect(cx-w/2-6,cy-h/2-6,w+12,h+12,6);ctx.fill();
     ctx.drawImage(titleImg,cx-w/2,cy-h/2,w,h);}
-  else drawLogoFallback(VW/2,80,G.menuTimer);
-  ctx.textAlign='center';ctx.fillStyle='#cfe2ff';ctx.font='9px serif';
-  if(isTouch){const c=['左半分ドラッグで移動／右半分タップで連射','右下の 低速・装備・法力 を押す','「膝」を撃って取得→バー→装備で確定'];
-    for(let i=0;i<c.length;i++)ctx.fillText(c[i],VW/2,200+i*14);}
-  else{const c=['移動:矢印／WASD　発射:Z　装備:X　法力:C','低速:Shift　休止:P／Esc','「膝」を撃って取得→バー→Xで確定'];
-    for(let i=0;i<c.length;i++)ctx.fillText(c[i],VW/2,200+i*14);}
-  if(Math.floor(G.menuTimer/30)%2===0){ctx.fillStyle='#fff';ctx.font='bold 15px serif';ctx.fillText('▼ 始めるには押下 ▼',VW/2,VH-8);}
+  else drawLogoFallback(VW/2,78,G.menuTimer);
+  ctx.textAlign='center';
+  const sel=G.titleSel||0;
+  ctx.fillStyle=sel===0?'#ffd23e':'#9fb8d8';ctx.font=(sel===0?'bold 16px':'14px')+' serif';
+  ctx.fillText((sel===0?'▶ ':'')+'はじめる',VW/2,VH-46);
+  ctx.fillStyle=sel===1?'#ffd23e':'#9fb8d8';ctx.font=(sel===1?'bold 16px':'14px')+' serif';
+  ctx.fillText((sel===1?'▶ ':'')+'遊び方',VW/2,VH-24);
+  ctx.fillStyle='#6a86a8';ctx.font='8px serif';
+  ctx.fillText(isTouch?'項目をタップ':'↑↓で選択／Zで決定',VW/2,VH-6);
   ctx.textAlign='left';}
 function drawDiffSelect(){
   drawBackground();
@@ -699,6 +723,7 @@ function render(inp){ctx.clearRect(0,0,VW,VH);
     if(Math.floor(G.menuTimer/30)%2===0){ctx.fillStyle='#fff';ctx.font='bold 14px serif';ctx.fillText('▼ 押して始める ▼',VW/2,VH-22);}
     ctx.textAlign='left';return;}
   if(G.state==='story'){drawStory();return;}if(G.state==='title'){drawTitle();return;}
+  if(G.state==='tutorial'){drawTutorial();return;}
   if(G.state==='diff'){drawDiffSelect();return;}if(G.state==='ending'){drawEnding();return;}
   let sx=0,sy=0;if(G.shake>0.5){sx=(Math.random()*2-1)*G.shake;sy=(Math.random()*2-1)*G.shake;}
   ctx.save();ctx.translate(sx,sy);drawBackground();
@@ -716,7 +741,23 @@ function keyEdge(code){const now=!!_keys[code],was=_ke[code];_ke[code]=now;retur
 function tapInDiff(tap){if(!tap)return -1;for(let i=0;i<3;i++){const y=118+i*40;if(tap.x>VW/2-115&&tap.x<VW/2+115&&tap.y>y-15&&tap.y<y+17)return i;}return -1;}
 function handleMeta(inp){
   if(G.state==='opening'){G.menuTimer++;if(inp.anyEdge){Audio.SE.menu();Audio.playMusic('menu',0,0);G.state='title';G.menuTimer=0;}return;}
-  if(G.state==='title'){G.menuTimer++;if(inp.anyEdge){Audio.SE.confirm();G.state='diff';G.menuTimer=0;}return;}
+  if(G.state==='title'){G.menuTimer++;
+    if(keyEdge('ArrowUp')||keyEdge('ArrowDown')){G.titleSel=1-(G.titleSel||0);Audio.SE.menu();}
+    if(inp.tap){
+      if(inp.tap.y>VH-60&&inp.tap.y<VH-38){G.titleSel=0;Audio.SE.confirm();G.state='diff';G.menuTimer=0;return;}
+      if(inp.tap.y>=VH-38&&inp.tap.y<VH-14){G.titleSel=1;Audio.SE.confirm();G.tutoStep=0;G.state='tutorial';G.menuTimer=0;return;}
+    }
+    if(inp.anyEdge&&!inp.tap){
+      if((G.titleSel||0)===0){Audio.SE.confirm();G.state='diff';G.menuTimer=0;}
+      else{Audio.SE.confirm();G.tutoStep=0;G.state='tutorial';G.menuTimer=0;}
+    }
+    return;}
+  if(G.state==='tutorial'){G.menuTimer++;
+    if(keyEdge('Escape')){G.state='title';G.menuTimer=0;Audio.SE.menu();return;}
+    if(inp.anyEdge){const last=G.tutoStep>=TUTORIAL.length-1;
+      if(last){Audio.SE.confirm();G.state='title';G.menuTimer=0;}
+      else{Audio.SE.menu();G.tutoStep++;}}
+    return;}
   if(G.state==='diff'){G.menuTimer++;
     if(inp.tap){const t=tapInDiff(inp.tap);if(t>=0){G.diffSel=t;CUR_DIFF=DIFF[['easy','normal','hard'][t]];Audio.SE.confirm();newGame();return;}}
     if(keyEdge('ArrowUp')){G.diffSel=(G.diffSel+2)%3;Audio.SE.menu();}
