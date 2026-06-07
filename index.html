@@ -2,14 +2,19 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="mobile-web-app-capable" content="yes">
 <title>HIZA Shooting</title>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
   html,body { width:100%; height:100%; background:#0a0a0a; overflow:hidden;
     touch-action:none; -webkit-user-select:none; user-select:none;
     font-family:'Yu Mincho','Hiragino Mincho ProN','MS Mincho',serif; }
-  #wrap { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; }
+  #wrap { position:fixed; left:0; top:0;
+    width:100vw; height:100vh; height:100dvh;
+    display:flex; align-items:center; justify-content:center; }
   canvas { display:block; image-rendering:auto;
     box-shadow:0 0 60px rgba(0,0,0,0.8); }
   #hint { position:fixed; bottom:3px; left:0; right:0; text-align:center;
@@ -22,28 +27,45 @@
 <script>
 "use strict";
 /* =========================================================================
-   HIZA Shooting v9
-   v8からの変更点：
-   1) 主砲ティア化：通常弾 < DOUBLE < LASER の3段。OPTION/SHIELD/SPEED/MISSILE
-      は補助強化として独立。補助の取得・喪失で主砲ティアが揺らがない。
-      → 「レーザー取得後に分身を取ると通常攻撃に戻る」を根治。
-   2) 膝カプセル供給増：各ステージ carrier 数を約1.5倍に増量。
-   3) レーザーを連続ビーム描画＋線分当たり判定へ変更（一本の直線）。
-   4) ストーリーを最新版に差し替え。
-   5) エンディング最終ページ中央に難易度別正方形画像を表示
-      （congrats_easy.jpg / congrats_normal.jpg / congrats_hard.jpg）。
-      読み込み失敗時は描画スキップでフォールバック。
+   HIZA Shooting v10
+   v9からの変更点（全画面/ビューポート三層）：
+   A) resize() を visualViewport 基準へ変更。モバイルのアドレスバー込みで
+      過大に返る innerHeight ではなく「実際に見えている領域」へフィット。
+      visualViewport の resize/scroll でも再計算。
+   B) CSS #wrap を 100dvh（dynamic viewport height）でレイアウト。
+   C) 最初の Canvas タップ（Audio.boot と同じジェスチャ起点）で
+      Fullscreen API を試行（モバイルのみ）。Android/PC は全画面化、
+      iOS Safari は非対応のため visualViewport フィットで救済。
+      横向きロックは対応端末のみ試行し、失敗は無視。
+   ─ 単一HTML方針を維持。外部ファイル（manifest/icon）は追加しない。
+   v8→v9 既存変更：主砲ティア化、レーザー連続ビーム、膝カプセル増量、
+   ストーリー差替、エンディング難易度別正方形画像。
    ========================================================================= */
 const VW=480,VH=270;
 const cv=document.getElementById('game'),ctx=cv.getContext('2d');
 let scale=1;
-function resize(){const ww=window.innerWidth,wh=window.innerHeight;scale=Math.min(ww/VW,wh/VH);
+/* --- (A) visualViewport 基準のサイズ取得 --- */
+function viewportSize(){const vv=window.visualViewport;
+  if(vv)return{w:vv.width,h:vv.height};return{w:window.innerWidth,h:window.innerHeight};}
+function resize(){const {w:ww,h:wh}=viewportSize();scale=Math.min(ww/VW,wh/VH);
   const dpr=Math.min(window.devicePixelRatio||1,2);
   cv.width=Math.round(VW*scale*dpr);cv.height=Math.round(VH*scale*dpr);
   cv.style.width=Math.round(VW*scale)+'px';cv.style.height=Math.round(VH*scale)+'px';
   ctx.setTransform(scale*dpr,0,0,scale*dpr,0,0);ctx.imageSmoothingEnabled=true;}
 window.addEventListener('resize',resize);
+window.addEventListener('orientationchange',()=>setTimeout(resize,120));
+if(window.visualViewport){
+  window.visualViewport.addEventListener('resize',resize);
+  window.visualViewport.addEventListener('scroll',resize);}
+document.addEventListener('fullscreenchange',()=>setTimeout(resize,80));
+document.addEventListener('webkitfullscreenchange',()=>setTimeout(resize,80));
 const isTouch=('ontouchstart' in window)||navigator.maxTouchPoints>0;
+/* --- (C) Fullscreen API 起動（ジェスチャ起点でのみ呼ぶこと） --- */
+function tryFullscreen(){const el=document.documentElement;
+  const req=el.requestFullscreen||el.webkitRequestFullscreen;
+  const inFs=document.fullscreenElement||document.webkitFullscreenElement;
+  if(req&&!inFs){try{const p=req.call(el);if(p&&p.catch)p.catch(()=>{});}catch(e){}}
+  if(screen.orientation&&screen.orientation.lock){try{screen.orientation.lock('landscape').catch(()=>{});}catch(e){}}}
 
 /* ---------- タイトル画像（hiza.jpg 同階層） ---------- */
 const titleImg=new Image();let titleImgOK=false;
@@ -320,8 +342,6 @@ const G={state:'opening',storyLines:[],storyStep:0,storyTimer:0,storyChars:0,aft
   player:null,pBullets:null,eBullets:null,enemies:null,particles:null,capsules:null,floaters:null,nebula:[],
   options:[],posHistory:[],powerBar:-1,
   POWER_NAMES:['SPEED','MISSILE','DOUBLE','LASER','OPTION','SHIELD'],
-  /* 主砲ティア化：mainTier 0=通常弾, 1=DOUBLE, 2=LASER。
-     補助強化(speed/missile/options/shield)とは独立に保持。 */
   equip:{speed:0,missile:false,mainTier:0,options:0,shield:false},shieldHp:0,
   score:0,lives:3,bombs:3,combo:0,comboTimer:0,comboMax:0,
   shake:0,hitstop:0,timeScale:1,waveIndex:0,stageTime:0,bgScroll:0,globalT:0,
@@ -380,8 +400,8 @@ function gainCapsule(){G.powerBar=(G.powerBar+1)%6;Audio.SE.capsule();}
 function confirmPower(){if(G.powerBar<0)return;const i=G.powerBar,eq=G.equip;
   if(i===0){if(eq.speed<5)eq.speed++;}
   else if(i===1)eq.missile=true;
-  else if(i===2){if(eq.mainTier<1)eq.mainTier=1;}      // DOUBLE：LASER所持(2)なら据え置き＝弱体化しない
-  else if(i===3){eq.mainTier=2;}                        // LASER：常に最上位へ
+  else if(i===2){if(eq.mainTier<1)eq.mainTier=1;}
+  else if(i===3){eq.mainTier=2;}
   else if(i===4){if(eq.options<4){eq.options++;G.options.push({x:G.player.x,y:G.player.y});}}
   else if(i===5){eq.shield=true;G.shieldHp=3;}
   Audio.SE.powerup();floatText(G.player.x,G.player.y-12,G.POWER_NAMES[i]+'!',50);G.powerBar=-1;}
@@ -392,10 +412,9 @@ function playerHit(){if(G.invuln>0)return false;
   if(G.equip.shield&&G.shieldHp>0){G.shieldHp--;if(G.shieldHp<=0)G.equip.shield=false;
     G.invuln=70;G.shake=8;Audio.SE.hit();spawnParticles(G.player.x,G.player.y,8,150,3);return true;}
   G.lives--;Audio.SE.death();G.shake=16;G.flash=1;G.hitstop=8;spawnParticles(G.player.x,G.player.y,30,200,4);G.combo=0;
-  /* ロスト優先順：補助→主砲ティア1段。主砲は一気に通常弾へは落とさない */
   if(G.equip.options>0){G.equip.options--;G.options.pop();}
   else if(G.equip.shield){G.equip.shield=false;G.shieldHp=0;}
-  else if(G.equip.mainTier>0)G.equip.mainTier--;       // LASER→DOUBLE→通常 と1段ずつ
+  else if(G.equip.mainTier>0)G.equip.mainTier--;
   else if(G.equip.missile)G.equip.missile=false;
   else if(G.equip.speed>0)G.equip.speed=Math.max(0,G.equip.speed-1);
   G.invuln=CUR_DIFF.invuln;if(G.lives<0)G.state='over';return true;}
@@ -417,9 +436,7 @@ function onBossCleared(){if(G.stageIndex<STAGES.length-1){Audio.SE.clear();
   else{Audio.SE.ending();Audio.playMusic('menu',0,0);G.endStep=0;G.endTimer=0;G.state='ending';}}
 
 /* ---------- レーザービーム（連続線分・1本の直線） ---------- */
-/* 各発射点(自機先端・各option先端)から右へ伸びる連続ビームを保持。
-   描画は1本の連なった直線、当たり判定も水平線分で連続判定する。 */
-let laserBeams=[];   // {y, x0} の配列。x0は発射開始X。
+let laserBeams=[];
 function buildLaserBeams(){laserBeams.length=0;
   const p=G.player;laserBeams.push({y:p.y,x0:p.x+9});
   for(const o of G.options)laserBeams.push({y:o.y,x0:o.x+7});}
@@ -447,10 +464,8 @@ function update(inp){G.globalT++;for(const n of G.nebula)n.ph+=0.005*n.sp;
   if(p.shotCd>0)p.shotCd--;
   const isLaser=G.equip.mainTier===2;
   if(isLaser){
-    // レーザーは連続ビーム。発射点を毎フレーム更新し、線分で当たり判定。
     buildLaserBeams();
     if(inp.fire){
-      // ビームDPS：各フレーム、ビーム線上の敵にダメージ
       for(const beam of laserBeams){
         G.enemies.forEach(e=>{if(!e.active)return;
           if(e.x>=beam.x0-e.r && Math.abs(e.y-beam.y)<e.r+3){
@@ -459,10 +474,7 @@ function update(inp){G.globalT++;for(const n of G.nebula)n.ph+=0.005*n.sp;
             if(e.hp<=0)killEnemy(e);}});
       }
       if(p.shotCd<=0){Audio.SE.laser();p.shotCd=4;}
-      // ミサイルはレーザー中も併用
-      if(G.equip.missile && p.shotCd>=3){ /* missileは下のfireWeapon系では出さず個別に */ }
     }
-    // レーザー中でもミサイルを撃つ
     if(inp.fire && G.equip.missile && (G.globalT%8===0)){
       const m=G.pBullets.spawn();m.x=p.x+6;m.y=p.y+2;m.vx=4;m.vy=2.5;m.type='missile';m.r=2.5;
       for(const o of G.options){const m2=G.pBullets.spawn();m2.x=o.x+5;m2.y=o.y+2;m2.vx=4;m2.vy=2.5;m2.type='missile';m2.r=2.5;}
@@ -513,7 +525,6 @@ function update(inp){G.globalT++;for(const n of G.nebula)n.ph+=0.005*n.sp;
   G.particles.forEach(pt=>{pt.x+=pt.vx;pt.y+=pt.vy;pt.vx*=0.94;pt.vy*=0.94;pt.life--;if(pt.life<=0)pt.active=false;});
   G.floaters.forEach(f=>{f.y+=f.vy;f.life--;if(f.life<=0)f.active=false;});}
 function fireWeapon(x,y){const eq=G.equip;
-  // 主砲ティア0=通常, 1=DOUBLE（LASERはupdate側で連続処理）
   const b=G.pBullets.spawn();b.x=x;b.y=y;b.vx=7;b.vy=0;b.type='normal';b.r=2;
   if(eq.mainTier>=1){const d=G.pBullets.spawn();d.x=x;d.y=y;d.vx=6;d.vy=-3;d.type='normal';d.r=2;}
   if(eq.missile){const m=G.pBullets.spawn();m.x=x;m.y=y+2;m.vx=4;m.vy=2.5;m.type='missile';m.r=2.5;}}
@@ -552,14 +563,11 @@ function drawLaserBeams(inp){
   const flick=0.85+0.15*Math.sin(G.globalT*0.8);
   for(const beam of laserBeams){
     const x0=beam.x0,x1=VW+4,y=beam.y;
-    // 外側グロー（太い帯）
     const g=ctx.createLinearGradient(0,y-6,0,y+6);
     g.addColorStop(0,'rgba(120,200,255,0)');g.addColorStop(0.5,'rgba(120,200,255,'+(0.45*flick)+')');g.addColorStop(1,'rgba(120,200,255,0)');
     ctx.fillStyle=g;ctx.fillRect(x0,y-6,x1-x0,12);
-    // 中核（白い1本の直線）
     ctx.fillStyle='rgba(220,240,255,'+flick+')';ctx.fillRect(x0,y-2,x1-x0,4);
     ctx.fillStyle='rgba(255,255,255,'+flick+')';ctx.fillRect(x0,y-0.8,x1-x0,1.6);
-    // 発射口の輝き
     const cg=ctx.createRadialGradient(x0,y,0,x0,y,7);
     cg.addColorStop(0,'rgba(255,255,255,'+flick+')');cg.addColorStop(1,'rgba(120,200,255,0)');
     ctx.fillStyle=cg;ctx.beginPath();ctx.arc(x0,y,7,0,Math.PI*2);ctx.fill();
@@ -763,14 +771,11 @@ function drawResult(){drawBackground();ctx.textAlign='center';
 function drawEnding(){drawBackground();ctx.textAlign='center';
   const lines=ENDING[G.endStep]||[],a=Math.min(1,G.endTimer/40),last=G.endStep>=ENDING.length-1;
   if(last){
-    // 難易度別 正方形スペシャル画像を中央に表示（読み込み成功時のみ）
     const dk=CUR_DIFF.key;const im=congratsImg[dk];const ok=congratsOK[dk];
     const imgSize=96,imgY=VH/2-58;
     if(ok&&im.width>0){
       const ia=Math.min(1,G.endTimer/50);ctx.globalAlpha=ia;
-      // 枠（白）
       ctx.fillStyle='rgba(255,255,255,0.92)';roundRect(VW/2-imgSize/2-4,imgY-imgSize/2-4,imgSize+8,imgSize+8,6);ctx.fill();
-      // 正方形にクロップ表示
       const s=Math.min(im.width,im.height),sx=(im.width-s)/2,sy=(im.height-s)/2;
       ctx.drawImage(im,sx,sy,s,s,VW/2-imgSize/2,imgY-imgSize/2,imgSize,imgSize);
       ctx.globalAlpha=1;
@@ -796,7 +801,7 @@ function render(inp){ctx.clearRect(0,0,VW,VH);
       const w=iw*r,h=ih*r,cx=VW/2,cy=VH/2-15;ctx.fillStyle='rgba(255,255,255,0.92)';roundRect(cx-w/2-6,cy-h/2-6,w+12,h+12,6);ctx.fill();
       ctx.drawImage(titleImg,cx-w/2,cy-h/2,w,h);}
     else drawLogoFallback(VW/2,VH/2-20,G.menuTimer);ctx.textAlign='center';
-    if(Math.floor(G.menuTimer/30)%2===0){ctx.fillStyle='#fff';ctx.font='bold 14px serif';ctx.fillText('▼ 押して始める ▼',VW/2,VH-22);}
+    if(Math.floor(G.menuTimer/30)%2===0){ctx.fillStyle='#fff';ctx.font='bold 14px serif';ctx.fillText(isTouch?'▼ タップで始める（全画面）▼':'▼ 押して始める ▼',VW/2,VH-22);}
     ctx.textAlign='left';return;}
   if(G.state==='story'){drawStory();return;}if(G.state==='title'){drawTitle();return;}
   if(G.state==='tutorial'){drawTutorial();return;}
@@ -852,7 +857,8 @@ let lastTime=0,acc=0;const STEP=1000/60;let lastInp={slow:false};
 function loop(now){requestAnimationFrame(loop);if(!lastTime)lastTime=now;let dt=now-lastTime;lastTime=now;if(dt>250)dt=250;
   acc+=dt;let steps=0;while(acc>=STEP&&steps<5){const inp=Input.poll();lastInp=inp;handleMeta(inp);update(inp);acc-=STEP;steps++;}
   render(lastInp);}
-document.addEventListener('pointerdown',()=>Audio.boot(),{once:true});
+/* --- (C) 最初のジェスチャで Audio.boot ＋ モバイルは全画面化を試行 --- */
+document.addEventListener('pointerdown',()=>{Audio.boot();if(isTouch)tryFullscreen();},{once:true});
 window.addEventListener('keydown',()=>Audio.boot(),{once:true});
 initStars();initNebula();resize();requestAnimationFrame(loop);
 </script>
